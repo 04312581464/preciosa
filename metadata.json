@@ -1,0 +1,9 @@
+{
+  "name": "PRECIOSA",
+  "description": "A desktop-based AI companion with a futuristic interface, featuring face authentication, system monitoring, and intelligent, voice-enabled interaction powered by Gemini. It can answer questions, understand emotions, manage notifications, and control web browsing.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
