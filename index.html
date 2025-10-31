@@ -11,7 +11,7 @@
       "imports": {
         "react": "https://esm.sh/react@18.2.0",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-        "@google/genai": "https://esm.sh/@google/genai@0.2.1"
+        "@google/genai": "https://esm.sh/@google/genai"
       }
     }
     </script>
@@ -52,7 +52,7 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
         import ReactDOM from 'react-dom/client';
-        import { GoogleGenerativeAI as GoogleGenAI, Chat, FunctionDeclaration, HarmCategory, HarmBlockThreshold } from "@google/genai";
+        import { GoogleGenAI, Chat, Type } from "@google/genai";
 
         // --- IMPORTANT ---
         // --- PASTE YOUR API KEY HERE ---
@@ -514,10 +514,7 @@
               }
 
               try {
-                genAI.current = new GoogleGenAI(API_KEY);
-                const model = genAI.current.getGenerativeModel({
-                  model: "gemini-1.5-flash",
-                });
+                genAI.current = new GoogleGenAI({ apiKey: API_KEY });
                 
                 const openWebsiteFunction = {
                   functionDeclarations: [
@@ -525,10 +522,10 @@
                       name: 'openWebsite',
                       description: 'Opens a specified website in a new browser tab.',
                       parameters: {
-                        type: "OBJECT",
+                        type: Type.OBJECT,
                         properties: {
                           url: {
-                            type: "STRING",
+                            type: Type.STRING,
                             description: 'The valid URL to open, e.g., "google.com".',
                           },
                         },
@@ -538,7 +535,8 @@
                   ],
                 };
 
-                chatRef.current = model.startChat({
+                chatRef.current = genAI.current.chats.create({
+                  model: "gemini-2.5-flash",
                   tools: [openWebsiteFunction],
                 });
 
@@ -577,51 +575,62 @@
             setIsLoading(true);
 
             try {
-              const result = await chatRef.current.sendMessage(text);
-              let response = result.response;
-              
-              const functionCalls = response.functionCalls();
+              // 1. Send the user message and get the initial response
+              const result = await chatRef.current.sendMessage({ message: text });
+              const response = result;
+
+              // 2. Check for function calls
+              const functionCalls = response.functionCalls;
               if (functionCalls && functionCalls.length > 0) {
-                 for (const fc of functionCalls) {
-                   if (fc.name === 'openWebsite') {
-                      const url = fc.args.url;
-                      if (typeof url !== 'string') {
-                          console.error("URL from function call is not a string:", url);
-                          // We don't send a message back to the user here, just fail gracefully.
-                          continue; //
-                      }
-                      
-                      const toolMessage = {
-                          id: `tool-${Date.now()}`,
-                          role: 'tool',
-                          text: `Executing: Opening ${url}`,
-                          timestamp: new Date().toLocaleTimeString(),
-                      };
-                      setMessages(prev => [...prev, toolMessage]);
-                      
-                      window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
-                      
-                      // Send function response back to the model
-                      const funcResponseResult = await chatRef.current.sendMessage([{
-                        functionResponse: {
-                          name: 'openWebsite',
-                          response: { result: "Successfully opened " + url }
-                        }
-                      }]);
+                const functionResponses = [];
 
-                      // update response to the new one after function call
-                      response = funcResponseResult.response;
-                   }
-                 }
+                for (const fc of functionCalls) {
+                  if (fc.name === 'openWebsite') {
+                    const url = fc.args.url;
+                    if (typeof url === 'string') {
+                        const toolMessage = {
+                            id: `tool-${Date.now()}`,
+                            role: 'tool',
+                            text: `Executing: Opening ${url}`,
+                            timestamp: new Date().toLocaleTimeString(),
+                        };
+                        setMessages(prev => [...prev, toolMessage]);
+                        window.open(url.startsWith('http') ? url : `https://${url}`, '_blank');
+                        
+                        functionResponses.push({
+                            functionResponse: {
+                                name: 'openWebsite',
+                                response: { result: "Successfully opened " + url },
+                            },
+                        });
+                    }
+                  }
+                }
+
+                // 3. Send function responses back to the model
+                const funcResponseResult = await chatRef.current.sendMessage({
+                    parts: functionResponses
+                });
+                
+                // 4. Get the final text response from the model
+                const finalResponse = funcResponseResult;
+                const modelResponse = {
+                    id: `model-${Date.now()}`,
+                    role: 'model',
+                    text: finalResponse.text,
+                    timestamp: new Date().toLocaleTimeString(),
+                };
+                setMessages(prev => [...prev, modelResponse]);
+              } else {
+                // No function call, just a regular text response
+                const modelResponse = {
+                    id: `model-${Date.now()}`,
+                    role: 'model',
+                    text: response.text,
+                    timestamp: new Date().toLocaleTimeString(),
+                };
+                setMessages(prev => [...prev, modelResponse]);
               }
-
-              const modelResponse = {
-                id: `model-${Date.now()}`,
-                role: 'model',
-                text: response.text(),
-                timestamp: new Date().toLocaleTimeString(),
-              };
-              setMessages(prev => [...prev, modelResponse]);
 
             } catch (error) {
                 console.error("Gemini API call failed:", error);
